@@ -104,7 +104,9 @@ class KuaiPan :
             kfile.list = self.process_url(self.get_fileList, self.get_fileview_url(kfile),parentFile = kfile)
             
 if __name__ == '__main__' :
-    client = KuaiPan('wanglei6744@gmail.com','@@Lei6744')
+    usrname = raw_input('username :')
+    passwd = raw_input('password :')
+    client = KuaiPan(usrname,passwd)
     client.login()
     page = client.opener.open('http://www.kuaipan.cn/index.php?ac=fileview')
     files = client.get_fileList(page.read())
