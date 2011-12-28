@@ -10,10 +10,9 @@ import urllib
 import urllib2
 import cookielib
 import json
-import DownLoadUtil
-import shutil
+from kuaipan_download import urllib2_down_load
 from BeautifulSoup import BeautifulSoup
-from KFile import KFile
+from kuaipan_file import KFile
 
 class KuaiPan :
     
@@ -29,7 +28,12 @@ class KuaiPan :
     
     download_url = r'%s/download/%s?etoken=%s&fileId=%s'
     
-    def __init__(self,username=None,passwd=None,cookiepath=r'.kuaipan.bat'):
+    sign_url = 'http://www.kuaipan.cn/index.php?ac=common&op=usersign'
+    
+    delete_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=delete'
+    
+    def __init__(self,root,username,passwd,cookiepath=r'.kuaipan.bat'):
+        self.root = root
         self.username=username
         self.passwd=passwd
         self.cookiepath=cookiepath
@@ -38,8 +42,7 @@ class KuaiPan :
             self.cookiejar.load(self.cookiepath)
         self.opener=urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookiejar))
         
-    def request_url(self,url,data = None,process = None,**args):
-        print url
+    def request_url(self,url, data = None, process = None,*args, **kargs):
         try:
             if data :
                 data = urllib.urlencode(data)
@@ -48,7 +51,7 @@ class KuaiPan :
             self.cookiejar.save(self.cookiepath,ignore_discard=True)
             if process :
                 if args :
-                    return process(response,**args)
+                    return process(response,*args,**kargs)
                 else :
                     return process(response)
             else :
@@ -60,7 +63,10 @@ class KuaiPan :
     def login(self) :
         data = {"username":self.username,"userpwd":self.passwd}
         response = self.request_url( self.login_url, data)
-        print not response.read().find('签到') == -1  
+        if not response.read().find('签到') == -1 :
+            print self.request_url(self.sign_url).read()
+            return True
+        else : return False
     
     def ls_file(self,kfile,recursion = False) :
         def parse_page(response) :
@@ -78,6 +84,7 @@ class KuaiPan :
                         f.fileid = tag['fileid']
                         f.type = tag["filetype"]
                         f.path = os.path.join(kfile.path,f.name)
+                        f.server_time = tag('td',{'class':'tr'})[0].text
                         if recursion :
                             self.ls_file(f, recursion)
                         files.append(f)
@@ -95,17 +102,23 @@ class KuaiPan :
                 files = self.request_url(ls_url,process = parse_page)
         return files
     
+    def get_download_url(self,kfike):
+        if kfile.type == 'file':
+            download_info_url = self.download_info_url % (kfile.fileid)
+            url_info = self.request_url(download_info_url,process = lambda content:
+                                        json.JSONDecoder('utf-8').decode(content.read()[1:len(content.read())-1]))
+            download_url = self.download_url % (url_info['url'],kfile.name,url_info['etoken'],kfile.fileid)
+        else :
+            return None
         
     def down_file(self,kfile,dest_dir,recursion = False):
         print 'sync file : %s ' % (kfile.path)
         if not os.path.exists(dest_dir) :
             os.makedirs(dest_dir)
         if kfile.type == 'file' :
-            download_info_url = self.download_info_url % (kfile.fileid)
-            url_info = self.request_url(download_info_url,process = lambda content:
-                                        json.JSONDecoder('utf-8').decode(content.read()[1:len(content.read())-1]))
-            download_url = self.download_url % (url_info['url'],kfile.name,url_info['etoken'],kfile.fileid)
-            DownLoadUtil.urllib2_down_load(download_url, os.path.join(dest_dir,kfile.path))
+            download_url = self.get_download_url(kfike)
+            if download_url :
+                urllib2_down_load(download_url, os.path.join(dest_dir,kfile.path))
             print '%s done!' % (kfile.name)
         elif kfile.type == 'folder' :
             self.ls_file(kfile)
@@ -116,17 +129,18 @@ class KuaiPan :
                     print 'process path %s' % kfile.path 
                     self.down_file(f,dest_dir,recursion)
                 
-    def sync_dir(self):
+    def sync_all(self):
         pass
             
 if __name__ == '__main__' :
     usrname = raw_input('username :')
     passwd = raw_input('password :')
-    client = KuaiPan(usrname,passwd)
+    client = KuaiPan('/home/lei/kuaipan',usrname,passwd)
     client.login()
     root = KFile()
     root.type = 'root'
     files = client.ls_file(root,recursion=True)
     for f in files :
-        client.down_file(f,'/home/lei/kuaipan',True)
+        print f
+        #client.down_file(f,'/home/lei/kuaipan',True)
         
