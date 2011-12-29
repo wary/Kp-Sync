@@ -3,17 +3,33 @@ Created on 2011-12-26
 
 @author: lei
 '''
-import inspect
 
 class KFile:
+    
+    @staticmethod
+    def new_instance( **kargs):
+        kfile = KFile()
+        if kargs :
+            for k,v in kargs.items() :
+                if hasattr(kfile, k) :
+                    setattr(kfile, k, v or getattr(kfile, k))
+        return kfile
+                    
     def __init__(self) :
         self.name = None
-        self.fileid = None
+        self.fileId = None
         self.type = None
+        self.parentId = None
+        self.sha1 = None
+        self.size = None
+        self.modTime = None
+        self.createdTime = None
+        self.shared = None
+        self.fileVer = None
+        self.opVer = None
         self.path = ''
-        self.server_time = None
-        self.local_time = None
         self.list = []
-    
+        
     def __str__(self):
-        return  '%s : % s : %s : %s ' % (self.name,self.fileid,self.type,self.path)
+        return  '%s : % s : %s : %s ' % (self.name,self.fileId,self.type,self.path)
+    

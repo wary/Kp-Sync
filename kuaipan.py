@@ -21,8 +21,8 @@ class KuaiPan :
     login_url = r'http://www.kuaipan.cn/index.php?ac=account&op=login'
     
     root_url = r'http://www.kuaipan.cn/index.php?ac=fileview'
-    
-    fileview_url= r'http://www.kuaipan.cn/index.php?ac=fileview&dirid=%s'
+      
+    file_list_url= 'http://www.kuaipan.cn/fileviewer/list/'
     
     download_info_url = r'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=getdownurl&fileId=%s'
     
@@ -31,6 +31,10 @@ class KuaiPan :
     sign_url = 'http://www.kuaipan.cn/index.php?ac=common&op=usersign'
     
     delete_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=delete'
+    
+    rename_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=rename'
+    
+    new_dir_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=newdir'
     
     def __init__(self,root,username,passwd,cookiepath=r'.kuaipan.bat'):
         self.root = root
@@ -64,50 +68,38 @@ class KuaiPan :
         data = {"username":self.username,"userpwd":self.passwd}
         response = self.request_url( self.login_url, data)
         if not response.read().find('签到') == -1 :
-            print self.request_url(self.sign_url).read()
+            print '登陆成功'
+            self.request_url(self.sign_url).read()
+            print '签到成功！'
             return True
         else : return False
     
-    def ls_file(self,kfile,recursion = False) :
-        def parse_page(response) :
-            files = []
+    def ls_file(self,kfile=None,recursion = False) :
+        files = []       
+        def parse_json(response) :
             if response :
-                soup = BeautifulSoup(response.read())
-                tags = soup('tbody',{'id':'filelistwrap'})
-                if tags:
-                    if tags[0](id = 'nofilewrap') :
-                        return files
-                    filetags = tags[0]('tr')
-                    for tag in filetags :
-                        f = KFile()
-                        f.name = tag['filename']
-                        f.fileid = tag['fileid']
-                        f.type = tag["filetype"]
-                        f.path = os.path.join(kfile.path,f.name)
-                        f.server_time = tag('td',{'class':'tr'})[0].text
-                        if recursion :
-                            self.ls_file(f, recursion)
-                        files.append(f)
-            kfile.list = files
-            return files
-        
-        if kfile :
-            if kfile.type == 'file' :
-                return []
-            else :
-                if kfile.type == 'root' :
-                    ls_url = self.root_url
-                else :
-                    ls_url = self.fileview_url % (kfile.fileid)
-                files = self.request_url(ls_url,process = parse_page)
+                result = json.JSONDecoder().decode(response.read())
+                if(result['result']['value'] == 'ok') :
+                    for item in result['file'] :
+                        if item : 
+                            f = KFile.new_instance(**item)
+                            print f
+                            f.path = os.path.join(kfile and kfile.path or '' , f.name)
+                            files.append(f)
+                            if recursion and f.type == 'folder' : self.ls_file(f,recursion)
+                    if kfile : kfile.list = files
+                return files
+        fileId = kfile and kfile.fileId or 'root'
+        files = self.request_url(self.file_list_url,{'id':fileId},process = parse_json)
         return files
     
-    def get_download_url(self,kfike):
+    def get_download_url(self,kfile):
         if kfile.type == 'file':
-            download_info_url = self.download_info_url % (kfile.fileid)
+            download_info_url = self.download_info_url % (kfile.fileId)
             url_info = self.request_url(download_info_url,process = lambda content:
                                         json.JSONDecoder('utf-8').decode(content.read()[1:len(content.read())-1]))
-            download_url = self.download_url % (url_info['url'],kfile.name,url_info['etoken'],kfile.fileid)
+            download_url = self.download_url % (url_info['url'],kfile.name,url_info['etoken'],kfile.fileId)
+            return download_url
         else :
             return None
         
@@ -116,10 +108,10 @@ class KuaiPan :
         if not os.path.exists(dest_dir) :
             os.makedirs(dest_dir)
         if kfile.type == 'file' :
-            download_url = self.get_download_url(kfike)
+            download_url = self.get_download_url(kfile)
             if download_url :
                 urllib2_down_load(download_url, os.path.join(dest_dir,kfile.path))
-            print '%s done!' % (kfile.name)
+                print '%s done!' % (kfile.name)
         elif kfile.type == 'folder' :
             self.ls_file(kfile)
             if not os.path.exists(os.path.join(dest_dir,kfile.path)) :
@@ -128,19 +120,57 @@ class KuaiPan :
                 for f in kfile.list :
                     print 'process path %s' % kfile.path 
                     self.down_file(f,dest_dir,recursion)
-                
+    
+    def new_dir(self,name,parent_file = None) :
+        if parent_file and parent_file.type == 'file' :
+            print '%s is not a dictionary !' % (parent_file.name)
+            return False
+        
+        parentId = parent_file and parent_file.fileId or ''
+        result = self.request_url(self.new_dir_url, {'parentid':parentId,'name':name},
+                                  lambda response :json.JSONDecoder().decode(response.read()))
+        
+        if result and result['xLive_attr'] :
+            if result['xLive_attr']['result'] in ('ok' , 'targetExist') :
+                file = KFile.new_instance(**result['xLive'])
+                file.path = os.path.join(parent_file and parent_file.path or '',name)
+                return file
+            else :
+                return False
+            
+    def delete_file(self,kfile) :
+        fileId = kfile and kfile.fileId
+        if fileId:
+            result = self.request_url(self.delete_url, {'fileid[]':fileId},
+                             lambda response :json.JSONDecoder().decode(response.read()))
+            print result
+            if result and result[0]['result'] == 'ok' :
+                return True
+            else : return False
+            
+    def rename_file(self,kfile,new_name) :
+        fileId = kfile and kfile.fileId
+        if fileId and new_name:
+            result = self.request_url(self.rename_url, {'fileid':fileId,'name':new_name},
+                             lambda response :json.JSONDecoder().decode(response.read()))
+            print result
+            if result and result['result'] == 'ok' :
+                return True
+            else : return False
+        
+            
     def sync_all(self):
         pass
             
 if __name__ == '__main__' :
+    
     usrname = raw_input('username :')
     passwd = raw_input('password :')
     client = KuaiPan('/home/lei/kuaipan',usrname,passwd)
     client.login()
-    root = KFile()
-    root.type = 'root'
-    files = client.ls_file(root,recursion=True)
-    for f in files :
-        print f
-        #client.down_file(f,'/home/lei/kuaipan',True)
+    kfile = client.new_dir('磊1')
+    print kfile.fileId
+    print client.rename_file(kfile, 'test')
+    for f in client.ls_file() :
+        print f.path
         
