@@ -10,9 +10,11 @@ import urllib
 import urllib2
 import cookielib
 import json
+import kuaipan_db
 from kuaipan_download import urllib2_down_load
 from BeautifulSoup import BeautifulSoup
 from kuaipan_file import KFile
+import MultipartPostHandler
 
 class KuaiPan :
     
@@ -36,6 +38,15 @@ class KuaiPan :
     
     new_dir_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=newdir'
     
+    #parameter
+    #fileid[]    
+    #parentid
+    move_url = 'http://www.kuaipan.cn/index.php?ac=fileview_handler&op=move'
+    
+    upload_info_url = 'http://www.kuaipan.cn/fileviewer/newfile/'
+    
+    upload_file_url = 'http://www.kuaipan.cn/fileviewer/uploaddata/'
+    
     def __init__(self,root,username,passwd,cookiepath=r'.kuaipan.bat'):
         self.root = root
         self.username=username
@@ -44,7 +55,7 @@ class KuaiPan :
         self.cookiejar=cookielib.LWPCookieJar()
         if os.path.exists(self.cookiepath) :
             self.cookiejar.load(self.cookiepath)
-        self.opener=urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookiejar))
+        self.opener=urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookiejar),MultipartPostHandler.MultipartPostHandler)
         
     def request_url(self,url, data = None, process = None,*args, **kargs):
         try:
@@ -83,7 +94,6 @@ class KuaiPan :
                     for item in result['file'] :
                         if item : 
                             f = KFile.new_instance(**item)
-                            print f
                             f.path = os.path.join(kfile and kfile.path or '' , f.name)
                             files.append(f)
                             if recursion and f.type == 'folder' : self.ls_file(f,recursion)
@@ -146,31 +156,57 @@ class KuaiPan :
             print result
             if result and result[0]['result'] == 'ok' :
                 return True
-            else : return False
+        return False
             
     def rename_file(self,kfile,new_name) :
         fileId = kfile and kfile.fileId
         if fileId and new_name:
             result = self.request_url(self.rename_url, {'fileid':fileId,'name':new_name},
                              lambda response :json.JSONDecoder().decode(response.read()))
-            print result
             if result and result['result'] == 'ok' :
                 return True
-            else : return False
-        
+            
+        return False
+    
+    def move_file(self,kfile,dest_dir = None) :
+        if kfile and (dest_dir and dest_dir.type or 'folder') == 'folder' :
+            parentid = dest_dir and dest_dir.fileId or 'root'
+            fileid = kfile.fileId 
+            result = self.request_url(self.move_url,{'fileid[]':fileid,'parentid':parentid},
+                                      lambda response :json.JSONDecoder().decode(response.read()))
+            if result and result[0]['result'] == 'ok' :
+                return True
+            
+        return False
+    
+    def upload_file(self,path,parent_file = None):
+        with open(path,'rb') as file:
+            size = file.__sizeof__()
+            print size
+            name = os.path.basename(path)
+            parentid =  parent_file and parent_file.fileId or 'root'
+            result = self.request_url(self.upload_info_url, {'parentId':parentid,'name':name,'size':size}, 
+                                   lambda response :json.JSONDecoder().decode(response.read()))
+            print result
+            fileId = result and result['fileId']
+            fields = {'fileName':name,'size':size,'url':fileId,}
+            if fileId :
+                pass
+                                       
+                    
+            
+            
+            
             
     def sync_all(self):
         pass
             
 if __name__ == '__main__' :
-    
     usrname = raw_input('username :')
     passwd = raw_input('password :')
     client = KuaiPan('/home/lei/kuaipan',usrname,passwd)
     client.login()
-    kfile = client.new_dir('磊1')
-    print kfile.fileId
-    print client.rename_file(kfile, 'test')
     for f in client.ls_file() :
-        print f.path
+        client.down_file(f, client.root)
+    
         
